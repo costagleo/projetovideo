@@ -4,25 +4,19 @@ version: "3.8"
 # PRODUÇÃO — Portainer Stack (Swarm + Traefik)
 # URL: video.axidia.com.br
 #
+# Imagem buildada automaticamente via GitHub Actions
+# e publicada em ghcr.io/costagleo/projetovideo:latest
+#
 # SETUP ÚNICO NO SERVIDOR (via SSH):
 #   docker volume create video_data
-#   cd /tmp && git clone https://github.com/costagleo/projetovideo.git && cd projetovideo
-#   docker build -t video-axidia:latest .
-#   rm -rf /tmp/projetovideo
 #
 # VARIÁVEIS — configure no Portainer (Stack > Environment):
 #   MASTER_EMAIL, MASTER_PASSWORD, SECRET_KEY
-#
-# ATUALIZAR IMAGEM (após push no git):
-#   cd /tmp && git clone https://github.com/costagleo/projetovideo.git && cd projetovideo
-#   docker build -t video-axidia:latest .
-#   rm -rf /tmp/projetovideo
-#   (depois: Update the stack no Portainer)
 # =============================================
 
 services:
   video_api:
-    image: video-axidia:latest
+    image: ghcr.io/costagleo/projetovideo:latest
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     networks:
       - interna
@@ -59,7 +53,7 @@ services:
         traefik.http.services.video.loadbalancer.server.port: "8000"
 
   video_worker:
-    image: video-axidia:latest
+    image: ghcr.io/costagleo/projetovideo:latest
     command: rq worker -u redis://github-gerador-relatorios_redis:6379/1 video_jobs
     networks:
       - interna
