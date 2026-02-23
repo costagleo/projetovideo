@@ -42,8 +42,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/api.js"></script>
-<script src="/static/js/auth.js"></script>
+<script src="/static/js/api.js?v={{ v }}"></script>
+<script src="/static/js/auth.js?v={{ v }}"></script>
 <script>
 document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();

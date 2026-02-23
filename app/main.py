@@ -1,4 +1,5 @@
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,8 @@ from app.auth import hash_password
 
 settings = get_settings()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+# Cache-busting version: changes on each server start
+_static_version = str(int(time.time()))
 
 
 def _ensure_master_user():
@@ -96,17 +99,17 @@ app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__
 # ---------- HTML routes ----------
 @app.get("/")
 def index(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    return templates.TemplateResponse("dashboard.html", {"request": request, "v": _static_version})
 
 
 @app.get("/login")
 def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse("login.html", {"request": request, "v": _static_version})
 
 
 @app.get("/signup")
 def signup_page(request: Request):
-    return templates.TemplateResponse("signup.html", {"request": request})
+    return templates.TemplateResponse("signup.html", {"request": request, "v": _static_version})
 
 
 @app.get("/health")

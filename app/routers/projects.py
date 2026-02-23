@@ -47,7 +47,6 @@ def create_project(
     db.add(track)
 
     db.commit()
-    db.refresh(project)
 
     # Create directory structure
     project_dir = os.path.join(settings.CURRENT_SECTION_PATH, "projects", project.id)
@@ -55,7 +54,13 @@ def create_project(
     os.makedirs(os.path.join(project_dir, "output"), exist_ok=True)
     os.makedirs(os.path.join(project_dir, "logs"), exist_ok=True)
 
-    return project
+    # Re-query with joinedload to include tracks in response
+    return (
+        db.query(Project)
+        .options(joinedload(Project.tracks).joinedload(Track.images))
+        .filter(Project.id == project.id)
+        .first()
+    )
 
 
 @router.get("", response_model=list[ProjectOut])

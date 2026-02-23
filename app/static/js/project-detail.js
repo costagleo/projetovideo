@@ -23,20 +23,26 @@ const ProjectDetail = {
             this.tracks = (this.project.tracks || []).sort((a, b) => a.order_index - b.order_index);
 
             // Header
-            document.getElementById('detail-project-name').textContent = this.project.name;
-            document.getElementById('detail-project-format').textContent = this.project.format === 'landscape' ? '16:9' : '9:16';
+            const nameEl = document.getElementById('detail-project-name');
+            const formatEl = document.getElementById('detail-project-format');
+            const infoEl = document.getElementById('detail-project-info');
+
+            if (nameEl) nameEl.textContent = this.project.name;
+            if (formatEl) formatEl.textContent = this.project.format === 'landscape' ? '16:9' : '9:16';
 
             // Info
-            document.getElementById('detail-project-info').innerHTML = `
-                <div class="grid grid-cols-2 gap-2">
-                    <p><span class="text-gray-500">Formato:</span> ${this.project.format === 'landscape' ? 'Landscape 16:9' : 'Vertical 9:16'}</p>
-                    <p><span class="text-gray-500">Ajuste:</span> ${this.FIT_LABELS[this.project.fit_mode] || this.project.fit_mode}</p>
-                    <p><span class="text-gray-500">FPS:</span> ${this.project.fps}</p>
-                    <p><span class="text-gray-500">Transição:</span> ${this.project.transition_s}s</p>
-                    <p><span class="text-gray-500">Preset:</span> ${this.project.preset}</p>
-                    <p><span class="text-gray-500">Trilhas:</span> ${this.tracks.length}</p>
-                </div>
-            `;
+            if (infoEl) {
+                infoEl.innerHTML = `
+                    <div class="grid grid-cols-2 gap-2">
+                        <p><span class="text-gray-500">Formato:</span> ${this.project.format === 'landscape' ? 'Landscape 16:9' : 'Vertical 9:16'}</p>
+                        <p><span class="text-gray-500">Ajuste:</span> ${this.FIT_LABELS[this.project.fit_mode] || this.project.fit_mode}</p>
+                        <p><span class="text-gray-500">FPS:</span> ${this.project.fps}</p>
+                        <p><span class="text-gray-500">Transição:</span> ${this.project.transition_s}s</p>
+                        <p><span class="text-gray-500">Preset:</span> ${this.project.preset}</p>
+                        <p><span class="text-gray-500">Trilhas:</span> ${this.tracks.length}</p>
+                    </div>
+                `;
+            }
 
             this.renderTracks();
 
@@ -237,6 +243,12 @@ const ProjectDetail = {
     },
 
     async removeImage(trackId, imageId) {
+        try {
+            await API.delete(`/api/images/${imageId}`);
+        } catch (err) {
+            Toast.error('Erro ao remover imagem: ' + err.message);
+            return;
+        }
         // Update local state and re-render
         const track = this.tracks.find(t => t.id === trackId);
         if (track) {

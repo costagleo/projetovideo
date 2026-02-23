@@ -112,6 +112,25 @@ async def upload_images(
     return created
 
 
+@router.delete("/api/images/{image_id}", response_model=MessageResponse)
+def delete_image(
+    image_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    img = db.query(Image).filter(Image.id == image_id).first()
+    if not img:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+
+    # Delete file from disk
+    if img.path and os.path.exists(img.path):
+        os.remove(img.path)
+
+    db.delete(img)
+    db.commit()
+    return MessageResponse(message="Imagem removida")
+
+
 @router.patch("/api/images/reorder", response_model=MessageResponse)
 def reorder_images(
     body: ImageReorderRequest,

@@ -347,14 +347,14 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/api.js"></script>
-<script src="/static/js/auth.js"></script>
-<script src="/static/js/dashboard.js"></script>
-<script src="/static/js/projects.js"></script>
-<script src="/static/js/project-detail.js"></script>
-<script src="/static/js/jobs.js"></script>
-<script src="/static/js/downloads.js"></script>
-<script src="/static/js/invites.js"></script>
+<script src="/static/js/api.js?v={{ v }}"></script>
+<script src="/static/js/auth.js?v={{ v }}"></script>
+<script src="/static/js/dashboard.js?v={{ v }}"></script>
+<script src="/static/js/projects.js?v={{ v }}"></script>
+<script src="/static/js/project-detail.js?v={{ v }}"></script>
+<script src="/static/js/jobs.js?v={{ v }}"></script>
+<script src="/static/js/downloads.js?v={{ v }}"></script>
+<script src="/static/js/invites.js?v={{ v }}"></script>
 <script>
     Auth.requireAuth();
     Dashboard.init();

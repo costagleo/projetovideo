@@ -49,8 +49,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/api.js"></script>
-<script src="/static/js/auth.js"></script>
+<script src="/static/js/api.js?v={{ v }}"></script>
+<script src="/static/js/auth.js?v={{ v }}"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token');
