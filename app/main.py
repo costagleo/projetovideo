@@ -75,7 +75,7 @@ app.add_middleware(
 )
 
 # Register routers
-from app.routers.auth import router as auth_router, invite_router, signup_router
+from app.routers.auth import router as auth_router, invite_router, users_router, signup_router
 from app.routers.sections import router as sections_router
 from app.routers.projects import router as projects_router
 from app.routers.uploads import router as uploads_router
@@ -84,6 +84,7 @@ from app.routers.downloads import router as downloads_router
 
 app.include_router(auth_router)
 app.include_router(invite_router)
+app.include_router(users_router)
 app.include_router(signup_router)
 app.include_router(sections_router)
 app.include_router(projects_router)

@@ -62,21 +62,15 @@ const Dashboard = {
 
     async loadHome() {
         try {
-            const [projects, jobs, section] = await Promise.all([
+            const [projects, jobs] = await Promise.all([
                 API.get('/api/projects'),
                 API.get('/api/jobs'),
-                API.get('/api/section/current'),
             ]);
 
             document.getElementById('home-project-count').textContent = projects.length;
 
             const activeJobs = jobs.filter(j => j.status === 'queued' || j.status === 'running');
             document.getElementById('home-job-count').textContent = activeJobs.length;
-
-            const sectionDate = new Date(section.created_at);
-            document.getElementById('home-section-date').textContent = sectionDate.toLocaleDateString('pt-BR', {
-                day: '2-digit', month: 'long', year: 'numeric'
-            });
 
             // Recent jobs
             const container = document.getElementById('home-recent-jobs');
@@ -112,17 +106,6 @@ const Dashboard = {
             const count = Array.isArray(result) ? result.length : 0;
             Toast.success(`${count} processamento(s) criado(s)!`);
             this.navigate('jobs');
-        } catch (err) {
-            Toast.error(err.message);
-        }
-    },
-
-    async newSection() {
-        if (!await this.confirm('Nova Seção', 'Isso vai criar uma nova seção e limpar todos os dados atuais. Deseja continuar?')) return;
-        try {
-            await API.post('/api/section/new');
-            Toast.success('Nova seção criada!');
-            this.loadHome();
         } catch (err) {
             Toast.error(err.message);
         }

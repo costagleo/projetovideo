@@ -27,12 +27,12 @@ class UserOut(BaseModel):
 
 # ---------- Invites ----------
 class InviteCreate(BaseModel):
-    email: str
+    name: str
 
 
 class InviteOut(BaseModel):
     id: str
-    email: str
+    name: str
     expires_at: datetime
     used_at: Optional[datetime] = None
     created_at: datetime

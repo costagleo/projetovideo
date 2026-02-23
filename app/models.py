@@ -38,7 +38,7 @@ class Invite(Base):
     __tablename__ = "invites"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    email = Column(String, nullable=False)
+    name = Column(String, nullable=False)
     token_hash = Column(String, nullable=False, unique=True)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)

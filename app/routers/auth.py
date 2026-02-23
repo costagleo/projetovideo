@@ -1,10 +1,12 @@
+import os
+import shutil
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User, Invite
+from app.models import User, Invite, Project, Job
 from app.schemas import (
     LoginRequest, TokenResponse, UserOut,
     InviteCreate, InviteOut, SignupRequest, MessageResponse,
@@ -54,7 +56,7 @@ def create_invite(
 ):
     raw_token, token_hash = generate_invite_token()
     invite = Invite(
-        email=body.email,
+        name=body.name,
         token_hash=token_hash,
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
         created_by=master.id,
@@ -89,6 +91,48 @@ def delete_invite(
     db.delete(invite)
     db.commit()
     return MessageResponse(message="Convite removido")
+
+
+# ---------- Users (MASTER only) ----------
+users_router = APIRouter(prefix="/api/users", tags=["Users"])
+
+
+@users_router.get("", response_model=list[UserOut])
+def list_users(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_master),
+):
+    return db.query(User).order_by(User.created_at.desc()).all()
+
+
+@users_router.delete("/{user_id}", response_model=MessageResponse)
+def delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    master: User = Depends(require_master),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    if user.role == "MASTER":
+        raise HTTPException(status_code=400, detail="Não é possível excluir o administrador")
+
+    # Delete user's project files
+    projects = db.query(Project).filter(Project.created_by == user.id).all()
+    for project in projects:
+        project_dir = os.path.join(settings.CURRENT_SECTION_PATH, "projects", project.id)
+        if os.path.exists(project_dir):
+            shutil.rmtree(project_dir)
+
+    # Delete user's jobs
+    for job in db.query(Job).filter(Job.created_by == user.id).all():
+        db.delete(job)
+    # Delete user's projects (ORM cascade deletes tracks/images)
+    for project in projects:
+        db.delete(project)
+    db.delete(user)
+    db.commit()
+    return MessageResponse(message="Usuário excluído")
 
 
 # ---------- Signup via invite token ----------

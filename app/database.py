@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
 
@@ -32,3 +32,14 @@ def get_db():
 def init_db():
     from app import models  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    _migrate_invites_email_to_name()
+
+
+def _migrate_invites_email_to_name():
+    """Rename invites.email column to invites.name if needed."""
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(invites)"))
+        columns = [row[1] for row in result]
+        if "email" in columns and "name" not in columns:
+            conn.execute(text("ALTER TABLE invites RENAME COLUMN email TO name"))
+            conn.commit()
