@@ -1,13 +1,12 @@
 version: "3.8"
 
 # =============================================
-# PRODUÇÃO — Portainer Stack (Swarm + Traefik)
+# PRODUÇÃO — Portainer Stack (Git Deploy + Traefik)
 # URL: video.axidia.com.br
 #
-# ANTES DO DEPLOY, construa a imagem no servidor:
-#   cd /tmp && git clone https://github.com/costagleo/projetovideo.git
-#   cd projetovideo && docker build -t video-axidia:latest .
-#   rm -rf /tmp/projetovideo
+# Deploy: Portainer > Stacks > Add Stack > Git Repository
+#   Repo: https://github.com/costagleo/projetovideo.git
+#   Compose path: docker-compose.prod.yml
 #
 # VARIÁVEIS SENSÍVEIS — configure no Portainer (Stack > Environment):
 #   MASTER_EMAIL, MASTER_PASSWORD, SECRET_KEY
@@ -15,7 +14,11 @@ version: "3.8"
 
 services:
   video_api:
-    image: video-axidia:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: video_api
+    restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     networks:
       - interna
@@ -37,22 +40,20 @@ services:
       WORKER_CONCURRENCY: "1"
       DEFAULT_PRESET: "balanced"
       BASE_URL: "https://video.axidia.com.br"
-    deploy:
-      replicas: 1
-      resources:
-        limits:
-          cpus: "0.50"
-          memory: 600M
-      labels:
-        traefik.enable: "true"
-        traefik.docker.network: "externa"
-        traefik.http.routers.video.rule: "Host(`video.axidia.com.br`)"
-        traefik.http.routers.video.entrypoints: "websecure"
-        traefik.http.routers.video.tls.certresolver: "le"
-        traefik.http.services.video.loadbalancer.server.port: "8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=externa"
+      - "traefik.http.routers.video.rule=Host(`video.axidia.com.br`)"
+      - "traefik.http.routers.video.entrypoints=websecure"
+      - "traefik.http.routers.video.tls.certresolver=le"
+      - "traefik.http.services.video.loadbalancer.server.port=8000"
 
   video_worker:
-    image: video-axidia:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: video_worker
+    restart: unless-stopped
     command: rq worker -u redis://github-gerador-relatorios_redis:6379/1 video_jobs
     networks:
       - interna
@@ -65,12 +66,6 @@ services:
       CURRENT_SECTION_PATH: "/data/projects/current"
       WORKER_CONCURRENCY: "1"
       DEFAULT_PRESET: "balanced"
-    deploy:
-      replicas: 1
-      resources:
-        limits:
-          cpus: "1.30"
-          memory: 3G
 
 networks:
   externa:
