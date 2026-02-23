@@ -107,15 +107,22 @@ def signup(
         raise HTTPException(status_code=400, detail="Token de convite inválido")
     if invite.used_at is not None:
         raise HTTPException(status_code=400, detail="Convite já utilizado")
-    if invite.expires_at < datetime.now(timezone.utc):
+
+    # Compare datetimes safely (SQLite stores naive UTC datetimes)
+    now_utc = datetime.now(timezone.utc)
+    expires = invite.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < now_utc:
         raise HTTPException(status_code=400, detail="Convite expirado")
 
-    existing = db.query(User).filter(User.email == invite.email).first()
+    # User chooses their own email
+    existing = db.query(User).filter(User.email == body.email).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Usuário já cadastrado com este e-mail")
+        raise HTTPException(status_code=400, detail="Já existe uma conta com este e-mail")
 
     user = User(
-        email=invite.email,
+        email=body.email,
         pass_hash=hash_password(body.password),
         role="USER",
     )

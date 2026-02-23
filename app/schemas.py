@@ -43,6 +43,7 @@ class InviteOut(BaseModel):
 
 
 class SignupRequest(BaseModel):
+    email: str
     password: str
 
 

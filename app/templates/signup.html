@@ -15,9 +15,10 @@
 
             <form id="signup-form" class="space-y-5">
                 <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-1">Token de Convite</label>
-                    <input type="text" id="token" readonly
-                        class="w-full px-4 py-2.5 bg-gray-700/50 border border-gray-600 rounded-lg text-gray-400 cursor-not-allowed">
+                    <label for="signup-email" class="block text-sm font-medium text-gray-300 mb-1">Seu E-mail</label>
+                    <input type="email" id="signup-email" name="email" required
+                        class="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        placeholder="seu@email.com">
                 </div>
 
                 <div>
@@ -54,10 +55,9 @@
 <script>
 const params = new URLSearchParams(window.location.search);
 const token = params.get('token');
-document.getElementById('token').value = token || '(sem token)';
 
 if (!token) {
-    document.getElementById('signup-error').textContent = 'Token de convite não encontrado na URL.';
+    document.getElementById('signup-error').textContent = 'Link de convite inválido. Solicite um novo convite.';
     document.getElementById('signup-error').classList.remove('hidden');
     document.getElementById('signup-btn').disabled = true;
 }
@@ -82,8 +82,10 @@ document.getElementById('signup-form').addEventListener('submit', async (e) => {
     btn.disabled = true;
     btn.textContent = 'Criando conta...';
 
+    const email = document.getElementById('signup-email').value;
+
     try {
-        await API.post(`/api/signup?token=${encodeURIComponent(token)}`, { password });
+        await API.post(`/api/signup?token=${encodeURIComponent(token)}`, { email, password });
         successDiv.textContent = 'Conta criada com sucesso! Redirecionando para login...';
         successDiv.classList.remove('hidden');
         setTimeout(() => { window.location.href = '/login'; }, 2000);
