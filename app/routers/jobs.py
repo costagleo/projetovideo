@@ -1,6 +1,7 @@
 import os
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -27,7 +28,7 @@ def render_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id, Project.created_by == current_user.id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
 
@@ -60,7 +61,7 @@ def render_all(
     current_user: User = Depends(get_current_user),
 ):
     section = _get_current_section(db)
-    projects = db.query(Project).filter(Project.section_id == section.id).all()
+    projects = db.query(Project).filter(Project.section_id == section.id, Project.created_by == current_user.id).all()
     if not projects:
         raise HTTPException(status_code=400, detail="Nenhum projeto na seção atual")
 
@@ -95,12 +96,12 @@ def render_all(
 @router.get("/api/jobs", response_model=list[JobOut])
 def list_jobs(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     section = _get_current_section(db)
     return (
         db.query(Job)
-        .filter(Job.section_id == section.id)
+        .filter(Job.section_id == section.id, Job.created_by == current_user.id)
         .order_by(Job.created_at)
         .all()
     )
@@ -110,9 +111,9 @@ def list_jobs(
 def get_job(
     job_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.created_by == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
     return job
@@ -122,9 +123,9 @@ def get_job(
 def get_job_log(
     job_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.created_by == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
     if not job.log_path or not os.path.exists(job.log_path):
@@ -137,9 +138,9 @@ def get_job_log(
 def delete_job(
     job_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    job = db.query(Job).filter(Job.id == job_id).first()
+    job = db.query(Job).filter(Job.id == job_id, Job.created_by == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
 
@@ -153,3 +154,32 @@ def delete_job(
     db.delete(job)
     db.commit()
     return MessageResponse(message="Job removido")
+
+
+@router.get("/api/jobs/{job_id}/download")
+def download_job_output(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    job = db.query(Job).filter(Job.id == job_id, Job.created_by == current_user.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    if job.status != "done":
+        raise HTTPException(status_code=400, detail="Renderização ainda não concluída")
+
+    project = db.query(Project).filter(Project.id == job.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    output_dir = os.path.join(settings.CURRENT_SECTION_PATH, "projects", project.id, "output")
+    if not os.path.exists(output_dir):
+        raise HTTPException(status_code=404, detail="Nenhum arquivo de saída encontrado")
+
+    # Find the output file (single continuous video)
+    files = [f for f in os.listdir(output_dir) if f.endswith(".mp4")]
+    if not files:
+        raise HTTPException(status_code=404, detail="Nenhum vídeo encontrado")
+
+    filepath = os.path.join(output_dir, files[0])
+    return FileResponse(filepath, filename=files[0], media_type="application/octet-stream")

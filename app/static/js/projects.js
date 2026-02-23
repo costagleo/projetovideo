@@ -101,6 +101,15 @@ const Projects = {
 document.getElementById('create-project-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
+        // Warn user if they already have a project (single-project-per-user)
+        if (Projects.list.length > 0) {
+            const ok = await Dashboard.confirm(
+                'Substituir Projeto',
+                'Você já possui um projeto. Ao criar um novo, o projeto anterior e todos os seus arquivos serão excluídos permanentemente. Deseja continuar?'
+            );
+            if (!ok) return;
+        }
+
         const project = await API.post('/api/projects', {
             name: document.getElementById('proj-name').value,
             format: document.getElementById('proj-format').value,

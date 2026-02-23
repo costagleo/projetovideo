@@ -33,9 +33,9 @@ def _get_output_files(project_id: str) -> list[dict]:
 def list_outputs(
     project_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id, Project.created_by == current_user.id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
 
@@ -57,8 +57,12 @@ def download_output(
     project_id: str,
     filename: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    project = db.query(Project).filter(Project.id == project_id, Project.created_by == current_user.id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
     # Verify the latest job is done before allowing download
     latest_job = (
         db.query(Job)
@@ -80,13 +84,13 @@ def download_output(
 @router.get("/api/section/outputs.zip")
 def download_all_zip(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     section = db.query(Section).filter(Section.is_current == True).first()  # noqa: E712
     if not section:
         raise HTTPException(status_code=400, detail="Nenhuma seção ativa")
 
-    projects = db.query(Project).filter(Project.section_id == section.id).all()
+    projects = db.query(Project).filter(Project.section_id == section.id, Project.created_by == current_user.id).all()
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:

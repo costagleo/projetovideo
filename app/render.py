@@ -3,6 +3,7 @@ Render engine — executed by the RQ worker.
 Orchestrates FFmpeg to produce video from audio + images.
 """
 import os
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -204,9 +205,10 @@ def _render_track(
     ])
 
     # Progress range for this track within the overall job
-    # e.g. track 0 of 2 => 0.0–0.5, track 1 of 2 => 0.5–1.0
-    progress_base = track_index / total_tracks
-    progress_span = 1.0 / total_tracks
+    # Encoding phase uses 0-95%, final concatenation uses 95-100%
+    encode_range = 0.95
+    progress_base = (track_index / total_tracks) * encode_range
+    progress_span = (1.0 / total_tracks) * encode_range
 
     # Execute FFmpeg with progress parsing
     start_time = time.time()
@@ -280,7 +282,7 @@ def _render_track(
             eta_s=0 if track_index == total_tracks - 1 else None,
         )
 
-    # Cleanup preprocessed images and concat list
+    # Cleanup preprocessed images and concat list (tmp_dir cleaned up by execute_render)
     for pp_path in preprocessed:
         try:
             os.remove(pp_path)
@@ -290,13 +292,56 @@ def _render_track(
         os.remove(concat_list_path)
     except OSError:
         pass
-    try:
-        os.rmdir(tmp_dir)
-    except OSError:
-        pass
 
     if process.returncode != 0:
         raise RuntimeError(f"FFmpeg failed (code {process.returncode}): {stderr_output[-500:]}")
+
+
+def _concat_videos(track_files: list[str], output_path: str, log_path: str):
+    """Concatenate multiple track videos into a single continuous video.
+    Uses FFmpeg concat demuxer with -c copy (no re-encode, very fast)."""
+    tmp_dir = os.path.dirname(track_files[0])
+    concat_list_path = os.path.join(tmp_dir, "final_concat.txt")
+
+    with open(concat_list_path, "w") as f:
+        for fpath in track_files:
+            safe_path = fpath.replace("\\", "/")
+            f.write(f"file '{safe_path}'\n")
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_list_path,
+        "-c", "copy",
+        output_path,
+    ]
+
+    log_file = open(log_path, "a")
+    log_file.write(f"\n--- Final concatenation ---\nCommand: {' '.join(cmd)}\n")
+    log_file.close()
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+    log_file = open(log_path, "a")
+    log_file.write(f"Return code: {result.returncode}\n")
+    if result.stderr:
+        log_file.write(f"STDERR:\n{result.stderr[-500:]}\n")
+    log_file.close()
+
+    # Cleanup temp files
+    try:
+        os.remove(concat_list_path)
+    except OSError:
+        pass
+    for fpath in track_files:
+        try:
+            os.remove(fpath)
+        except OSError:
+            pass
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Final concatenation failed (code {result.returncode}): {result.stderr[-500:]}")
 
 
 def execute_render(job_id: str):
@@ -331,8 +376,10 @@ def execute_render(job_id: str):
 
         project_dir = os.path.join(settings.CURRENT_SECTION_PATH, "projects", project.id)
         output_dir = os.path.join(project_dir, "output")
+        tmp_dir = os.path.join(project_dir, "tmp")
         logs_dir = os.path.join(project_dir, "logs")
         os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(tmp_dir, exist_ok=True)
         os.makedirs(logs_dir, exist_ok=True)
 
         log_path = os.path.join(logs_dir, f"job_{job_id}.log")
@@ -344,23 +391,43 @@ def execute_render(job_id: str):
         with open(log_path, "w") as f:
             f.write(f"Project: {project.name} ({total_tracks} tracks)\n\n")
 
+        # Render each track to a temporary video file
+        track_files = []
         for i, track in enumerate(tracks):
             # Sort images explicitly from the eager-loaded list
             track_images = sorted(track.images, key=lambda x: x.order_index)
 
-            output_filename = f"{project.name}_track{track.order_index}.mp4"
-            output_path = os.path.join(output_dir, output_filename)
+            # Render to tmp dir (will be concatenated later)
+            tmp_filename = f"track_{track.order_index}.mp4"
+            tmp_path = os.path.join(tmp_dir, tmp_filename)
+            track_files.append(tmp_path)
 
             _render_track(
                 track=track,
                 images=track_images,
                 project=project,
-                output_path=output_path,
+                output_path=tmp_path,
                 log_path=log_path,
                 job_id=job_id,
                 track_index=i,
                 total_tracks=total_tracks,
             )
+
+        # Concatenate all tracks into a single continuous video
+        _update_job(job_id, progress=0.95, eta_s=5)
+
+        final_output = os.path.join(output_dir, f"{project.name}.mp4")
+
+        if len(track_files) == 1:
+            # Single track — just move to output (no concat needed)
+            shutil.move(track_files[0], final_output)
+            with open(log_path, "a") as f:
+                f.write("\n--- Single track, moved directly to output ---\n")
+        else:
+            _concat_videos(track_files, final_output, log_path)
+
+        # Cleanup tmp directory
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
         # Mark as done
         _update_job(

@@ -29,6 +29,20 @@ def create_project(
 ):
     section = _get_current_section(db)
 
+    # Auto-delete existing project for this user (single-project-per-user)
+    existing = (
+        db.query(Project)
+        .filter(Project.section_id == section.id, Project.created_by == current_user.id)
+        .all()
+    )
+    for old_project in existing:
+        old_dir = os.path.join(settings.CURRENT_SECTION_PATH, "projects", old_project.id)
+        if os.path.exists(old_dir):
+            shutil.rmtree(old_dir)
+        db.delete(old_project)
+    if existing:
+        db.flush()
+
     project = Project(
         section_id=section.id,
         name=body.name,
@@ -66,13 +80,13 @@ def create_project(
 @router.get("", response_model=list[ProjectOut])
 def list_projects(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     section = _get_current_section(db)
     return (
         db.query(Project)
         .options(joinedload(Project.tracks).joinedload(Track.images))
-        .filter(Project.section_id == section.id)
+        .filter(Project.section_id == section.id, Project.created_by == current_user.id)
         .order_by(Project.created_at)
         .all()
     )
@@ -82,12 +96,12 @@ def list_projects(
 def get_project(
     project_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     project = (
         db.query(Project)
         .options(joinedload(Project.tracks).joinedload(Track.images))
-        .filter(Project.id == project_id)
+        .filter(Project.id == project_id, Project.created_by == current_user.id)
         .first()
     )
     if not project:
@@ -99,9 +113,9 @@ def get_project(
 def add_track(
     project_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id, Project.created_by == current_user.id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
 
@@ -119,8 +133,11 @@ def delete_track(
     project_id: str,
     track_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
+    project = db.query(Project).filter(Project.id == project_id, Project.created_by == current_user.id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
     track = db.query(Track).filter(Track.id == track_id, Track.project_id == project_id).first()
     if not track:
         raise HTTPException(status_code=404, detail="Trilha não encontrada")
@@ -139,9 +156,9 @@ def delete_track(
 def delete_project(
     project_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = db.query(Project).filter(Project.id == project_id, Project.created_by == current_user.id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
 

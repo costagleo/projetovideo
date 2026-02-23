@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Track, Image, User
+from app.models import Project, Track, Image, User
 from app.schemas import TrackOut, ImageOut, ImageReorderRequest, MessageResponse
 from app.auth import get_current_user
 from app.config import get_settings
@@ -40,11 +40,14 @@ async def upload_audio(
     track_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     track = db.query(Track).filter(Track.id == track_id).first()
     if not track:
         raise HTTPException(status_code=404, detail="Track não encontrada")
+    project = db.query(Project).filter(Project.id == track.project_id, Project.created_by == current_user.id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
 
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_AUDIO_EXTS:
@@ -74,11 +77,14 @@ async def upload_images(
     track_id: str,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     track = db.query(Track).filter(Track.id == track_id).first()
     if not track:
         raise HTTPException(status_code=404, detail="Track não encontrada")
+    project = db.query(Project).filter(Project.id == track.project_id, Project.created_by == current_user.id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
 
     project_dir = os.path.join(
         settings.CURRENT_SECTION_PATH, "projects", track.project_id, "input"
@@ -116,11 +122,16 @@ async def upload_images(
 def delete_image(
     image_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     img = db.query(Image).filter(Image.id == image_id).first()
     if not img:
         raise HTTPException(status_code=404, detail="Imagem não encontrada")
+    track = db.query(Track).filter(Track.id == img.track_id).first()
+    if track:
+        project = db.query(Project).filter(Project.id == track.project_id, Project.created_by == current_user.id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Projeto não encontrado")
 
     # Delete file from disk
     if img.path and os.path.exists(img.path):
@@ -135,7 +146,7 @@ def delete_image(
 def reorder_images(
     body: ImageReorderRequest,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     for item in body.images:
         img = db.query(Image).filter(Image.id == item.image_id).first()
