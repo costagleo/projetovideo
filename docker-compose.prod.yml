@@ -1,24 +1,28 @@
 version: "3.8"
 
 # =============================================
-# PRODUÇÃO — Portainer Stack (Git Deploy + Traefik)
+# PRODUÇÃO — Portainer Stack (Swarm + Traefik)
 # URL: video.axidia.com.br
 #
-# Deploy: Portainer > Stacks > Add Stack > Git Repository
-#   Repo: https://github.com/costagleo/projetovideo.git
-#   Compose path: docker-compose.prod.yml
+# SETUP ÚNICO NO SERVIDOR (via SSH):
+#   docker volume create video_data
+#   cd /tmp && git clone https://github.com/costagleo/projetovideo.git && cd projetovideo
+#   docker build -t video-axidia:latest .
+#   rm -rf /tmp/projetovideo
 #
-# VARIÁVEIS SENSÍVEIS — configure no Portainer (Stack > Environment):
+# VARIÁVEIS — configure no Portainer (Stack > Environment):
 #   MASTER_EMAIL, MASTER_PASSWORD, SECRET_KEY
+#
+# ATUALIZAR IMAGEM (após push no git):
+#   cd /tmp && git clone https://github.com/costagleo/projetovideo.git && cd projetovideo
+#   docker build -t video-axidia:latest .
+#   rm -rf /tmp/projetovideo
+#   (depois: Update the stack no Portainer)
 # =============================================
 
 services:
   video_api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: video_api
-    restart: unless-stopped
+    image: video-axidia:latest
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     networks:
       - interna
@@ -40,20 +44,22 @@ services:
       WORKER_CONCURRENCY: "1"
       DEFAULT_PRESET: "balanced"
       BASE_URL: "https://video.axidia.com.br"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=externa"
-      - "traefik.http.routers.video.rule=Host(`video.axidia.com.br`)"
-      - "traefik.http.routers.video.entrypoints=websecure"
-      - "traefik.http.routers.video.tls.certresolver=le"
-      - "traefik.http.services.video.loadbalancer.server.port=8000"
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 600M
+      labels:
+        traefik.enable: "true"
+        traefik.docker.network: "externa"
+        traefik.http.routers.video.rule: "Host(`video.axidia.com.br`)"
+        traefik.http.routers.video.entrypoints: "websecure"
+        traefik.http.routers.video.tls.certresolver: "le"
+        traefik.http.services.video.loadbalancer.server.port: "8000"
 
   video_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: video_worker
-    restart: unless-stopped
+    image: video-axidia:latest
     command: rq worker -u redis://github-gerador-relatorios_redis:6379/1 video_jobs
     networks:
       - interna
@@ -66,6 +72,12 @@ services:
       CURRENT_SECTION_PATH: "/data/projects/current"
       WORKER_CONCURRENCY: "1"
       DEFAULT_PRESET: "balanced"
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "1.30"
+          memory: 3G
 
 networks:
   externa:
