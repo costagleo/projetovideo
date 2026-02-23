@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Section, Project, Track, User
-from app.schemas import ProjectCreate, ProjectOut, TrackOut, MessageResponse
+from app.schemas import ProjectCreate, ProjectUpdate, ProjectOut, TrackOut, MessageResponse
 from app.auth import get_current_user
 from app.config import get_settings
 
@@ -107,6 +107,31 @@ def get_project(
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
     return project
+
+
+@router.patch("/{project_id}", response_model=ProjectOut)
+def update_project(
+    project_id: str,
+    body: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = db.query(Project).filter(Project.id == project_id, Project.created_by == current_user.id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    update_data = body.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(project, key, value)
+
+    db.commit()
+
+    return (
+        db.query(Project)
+        .options(joinedload(Project.tracks).joinedload(Track.images))
+        .filter(Project.id == project.id)
+        .first()
+    )
 
 
 @router.post("/{project_id}/tracks", response_model=TrackOut, status_code=status.HTTP_201_CREATED)

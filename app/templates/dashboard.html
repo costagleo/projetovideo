@@ -97,6 +97,9 @@
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
                     <h2 class="text-xl sm:text-2xl font-bold">Início</h2>
                     <div class="flex gap-2">
+                        <button onclick="Projects.showCreateModal()" class="flex-1 sm:flex-none px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition-colors">
+                            + Novo Projeto
+                        </button>
                         <button onclick="Dashboard.renderAll()" class="flex-1 sm:flex-none px-3 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition-colors">
                             Renderizar Tudo
                         </button>
@@ -225,7 +228,15 @@
 
                 <!-- Project info card -->
                 <div class="bg-gray-800 rounded-lg p-4 md:p-5 mb-6">
-                    <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Configurações do Projeto</h3>
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide">Configurações do Projeto</h3>
+                        <button onclick="ProjectDetail.showEditModal()" class="flex items-center gap-1 px-2.5 py-1 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-gray-700 rounded-lg transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                            Editar
+                        </button>
+                    </div>
                     <div id="detail-project-info" class="space-y-2 text-sm text-gray-400">
                         <p>Carregando...</p>
                     </div>
@@ -246,6 +257,63 @@
                 <!-- Tracks container (dynamically rendered by JS) -->
                 <div id="tracks-container" class="space-y-4">
                     <p class="text-gray-500 text-sm">Carregando...</p>
+                </div>
+
+                <!-- Edit project modal -->
+                <div id="edit-project-modal" class="hidden">
+                    <div class="modal-backdrop" onclick="ProjectDetail.hideEditModal()">
+                        <div class="modal-box" onclick="event.stopPropagation()">
+                            <h3 class="text-lg font-bold mb-4">Editar Projeto</h3>
+                            <form id="edit-project-form" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Nome do Projeto</label>
+                                    <input type="text" id="edit-proj-name" required
+                                        class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-1">Formato</label>
+                                        <select id="edit-proj-format" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                            <option value="landscape">Paisagem (16:9)</option>
+                                            <option value="vertical">Vertical (9:16)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-1">Ajuste de Imagem</label>
+                                        <select id="edit-proj-fit-mode" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                            <option value="smart_background">Fundo Inteligente (desfoque)</option>
+                                            <option value="contain_pad">Ajustar com barras pretas</option>
+                                            <option value="cover_crop">Preencher com corte</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-1">FPS</label>
+                                        <input type="number" id="edit-proj-fps" min="1" max="60"
+                                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-1">Transição</label>
+                                        <input type="number" id="edit-proj-transition" min="0" max="5" step="0.1"
+                                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-1">Qualidade</label>
+                                        <select id="edit-proj-preset" class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                            <option value="balanced">Balanceado</option>
+                                            <option value="fast">Rápido</option>
+                                            <option value="quality">Máxima</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="flex justify-end gap-3 pt-2">
+                                    <button type="button" onclick="ProjectDetail.hideEditModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-lg text-sm">Cancelar</button>
+                                    <button type="submit" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium">Salvar</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
                 </div>
             </div>
 

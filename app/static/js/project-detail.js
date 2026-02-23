@@ -130,6 +130,16 @@ const ProjectDetail = {
             `;
         }).join('');
 
+        // Add "Adicionar Trilha" button after the last track
+        container.innerHTML += `
+            <button onclick="ProjectDetail.addTrack()" class="w-full py-4 border-2 border-dashed border-gray-600 hover:border-indigo-500 rounded-lg text-gray-400 hover:text-indigo-400 transition-colors flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Adicionar Trilha
+            </button>
+        `;
+
         // Setup drag-drop for all zones
         this.setupAllDropZones();
         this.setupAllDragDrop();
@@ -299,5 +309,40 @@ const ProjectDetail = {
         } catch (err) {
             Toast.error(err.message);
         }
+    },
+
+    showEditModal() {
+        if (!this.project) return;
+        document.getElementById('edit-proj-name').value = this.project.name;
+        document.getElementById('edit-proj-format').value = this.project.format;
+        document.getElementById('edit-proj-fit-mode').value = this.project.fit_mode;
+        document.getElementById('edit-proj-fps').value = this.project.fps;
+        document.getElementById('edit-proj-transition').value = this.project.transition_s;
+        document.getElementById('edit-proj-preset').value = this.project.preset;
+        document.getElementById('edit-project-modal').classList.remove('hidden');
+    },
+
+    hideEditModal() {
+        document.getElementById('edit-project-modal').classList.add('hidden');
     }
 };
+
+// Edit project form
+document.getElementById('edit-project-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        await API.patch(`/api/projects/${ProjectDetail.projectId}`, {
+            name: document.getElementById('edit-proj-name').value,
+            format: document.getElementById('edit-proj-format').value,
+            fit_mode: document.getElementById('edit-proj-fit-mode').value,
+            fps: parseInt(document.getElementById('edit-proj-fps').value),
+            transition_s: parseFloat(document.getElementById('edit-proj-transition').value),
+            preset: document.getElementById('edit-proj-preset').value,
+        });
+        ProjectDetail.hideEditModal();
+        Toast.success('Projeto atualizado!');
+        ProjectDetail.load();
+    } catch (err) {
+        Toast.error(err.message);
+    }
+});

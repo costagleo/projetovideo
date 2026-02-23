@@ -67,6 +67,15 @@ class ProjectCreate(BaseModel):
     preset: str = "balanced"
 
 
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    format: Optional[str] = None
+    fit_mode: Optional[str] = None
+    fps: Optional[int] = None
+    transition_s: Optional[float] = None
+    preset: Optional[str] = None
+
+
 class ProjectOut(BaseModel):
     id: str
     section_id: str
