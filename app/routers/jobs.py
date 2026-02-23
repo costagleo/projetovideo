@@ -143,9 +143,6 @@ def delete_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
 
-    if job.status == "running":
-        raise HTTPException(status_code=400, detail="Não é possível excluir um job em execução")
-
     # Delete log file if exists
     if job.log_path and os.path.exists(job.log_path):
         try:
