@@ -1,8 +1,10 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.database import init_db, SessionLocal
@@ -11,6 +13,7 @@ from app.auth import hash_password
 
 
 settings = get_settings()
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 
 def _ensure_master_user():
@@ -86,9 +89,24 @@ app.include_router(jobs_router)
 app.include_router(downloads_router)
 
 
+# Mount static files
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
+
+
+# ---------- HTML routes ----------
 @app.get("/")
-def read_root():
-    return {"message": "Bem-vindo à API do Axidia Video Render v3"}
+def index(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+
+@app.get("/login")
+def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/signup")
+def signup_page(request: Request):
+    return templates.TemplateResponse("signup.html", {"request": request})
 
 
 @app.get("/health")

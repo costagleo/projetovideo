@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Login — Axidia Video Render{% endblock %}
+
+{% block body %}
+<div class="min-h-screen flex items-center justify-center px-4">
+    <div class="w-full max-w-md">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-indigo-400">Axidia Video Render</h1>
+            <p class="text-gray-400 mt-2">Faça login para continuar</p>
+        </div>
+
+        <div class="bg-gray-800 rounded-lg p-8 shadow-xl">
+            <div id="login-error" class="hidden bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg mb-4"></div>
+
+            <form id="login-form" class="space-y-5">
+                <div>
+                    <label for="email" class="block text-sm font-medium text-gray-300 mb-1">E-mail</label>
+                    <input type="email" id="email" name="email" required
+                        class="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        placeholder="seu@email.com">
+                </div>
+
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-300 mb-1">Senha</label>
+                    <input type="password" id="password" name="password" required
+                        class="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-lg text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        placeholder="••••••••">
+                </div>
+
+                <button type="submit" id="login-btn"
+                    class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-800">
+                    Entrar
+                </button>
+            </form>
+        </div>
+
+        <p class="text-center text-gray-500 text-sm mt-6">
+            v3.0 &mdash; Axidia Video Render
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/api.js"></script>
+<script src="/static/js/auth.js"></script>
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    const errorDiv = document.getElementById('login-error');
+    errorDiv.classList.add('hidden');
+    btn.disabled = true;
+    btn.textContent = 'Entrando...';
+
+    try {
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+        await Auth.login(email, password);
+        window.location.href = '/';
+    } catch (err) {
+        errorDiv.textContent = err.message || 'Erro ao fazer login';
+        errorDiv.classList.remove('hidden');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Entrar';
+    }
+});
+
+// If already logged in, redirect
+if (Auth.getToken()) {
+    window.location.href = '/';
+}
+</script>
+{% endblock %}

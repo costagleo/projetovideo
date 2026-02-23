@@ -63,9 +63,9 @@ def create_invite(
     db.commit()
     db.refresh(invite)
     # Return the raw token in the response so the MASTER can share it
-    invite_url = f"{settings.BASE_URL}/api/signup?token={raw_token}"
+    invite_url = f"{settings.BASE_URL}/signup?token={raw_token}"
     out = InviteOut.model_validate(invite)
-    # We attach the invite URL as extra info
+    out.invite_url = invite_url
     return out
 
 

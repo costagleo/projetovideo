@@ -2,7 +2,7 @@ import os
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Section, Project, Track, User
@@ -64,7 +64,13 @@ def list_projects(
     _: User = Depends(get_current_user),
 ):
     section = _get_current_section(db)
-    return db.query(Project).filter(Project.section_id == section.id).order_by(Project.created_at).all()
+    return (
+        db.query(Project)
+        .options(joinedload(Project.tracks).joinedload(Track.images))
+        .filter(Project.section_id == section.id)
+        .order_by(Project.created_at)
+        .all()
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -73,7 +79,12 @@ def get_project(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = (
+        db.query(Project)
+        .options(joinedload(Project.tracks).joinedload(Track.images))
+        .filter(Project.id == project_id)
+        .first()
+    )
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
     return project

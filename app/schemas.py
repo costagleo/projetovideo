@@ -36,6 +36,7 @@ class InviteOut(BaseModel):
     expires_at: datetime
     used_at: Optional[datetime] = None
     created_at: datetime
+    invite_url: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -76,6 +77,7 @@ class ProjectOut(BaseModel):
     preset: str
     created_by: str
     created_at: datetime
+    tracks: list["TrackOut"] = []
 
     class Config:
         from_attributes = True
@@ -88,6 +90,7 @@ class TrackOut(BaseModel):
     audio_path: Optional[str] = None
     duration_ms: Optional[int] = None
     order_index: int
+    images: list["ImageOut"] = []
 
     class Config:
         from_attributes = True
