@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import Section, Project, Track, User
-from app.schemas import ProjectCreate, ProjectOut, MessageResponse
+from app.schemas import ProjectCreate, ProjectOut, TrackOut, MessageResponse
 from app.auth import get_current_user
 from app.config import get_settings
 
@@ -88,6 +88,46 @@ def get_project(
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
     return project
+
+
+@router.post("/{project_id}/tracks", response_model=TrackOut, status_code=status.HTTP_201_CREATED)
+def add_track(
+    project_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    # Get next order_index
+    max_idx = db.query(Track).filter(Track.project_id == project_id).count()
+    track = Track(project_id=project_id, order_index=max_idx)
+    db.add(track)
+    db.commit()
+    db.refresh(track)
+    return track
+
+
+@router.delete("/{project_id}/tracks/{track_id}", response_model=MessageResponse)
+def delete_track(
+    project_id: str,
+    track_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    track = db.query(Track).filter(Track.id == track_id, Track.project_id == project_id).first()
+    if not track:
+        raise HTTPException(status_code=404, detail="Trilha não encontrada")
+
+    # Don't delete the last track
+    count = db.query(Track).filter(Track.project_id == project_id).count()
+    if count <= 1:
+        raise HTTPException(status_code=400, detail="O projeto deve ter pelo menos uma trilha")
+
+    db.delete(track)
+    db.commit()
+    return MessageResponse(message="Trilha removida")
 
 
 @router.delete("/{project_id}", response_model=MessageResponse)

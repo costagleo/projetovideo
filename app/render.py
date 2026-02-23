@@ -212,7 +212,7 @@ def _render_track(
                     eta = (elapsed / progress - elapsed) if progress > 0.01 else None
                     _update_job(
                         job_id,
-                        progress=round(progress * 100, 1),
+                        progress=round(progress, 4),
                         eta_s=round(eta, 1) if eta else None,
                     )
             except (ValueError, ZeroDivisionError):
@@ -281,7 +281,7 @@ def execute_render(job_id: str):
         _update_job(
             job_id,
             status="done",
-            progress=100.0,
+            progress=1.0,
             eta_s=0,
             finished_at=datetime.now(timezone.utc),
         )

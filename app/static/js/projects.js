@@ -32,7 +32,8 @@ const Projects = {
 
         container.innerHTML = this.list.map(project => {
             const formatLabel = project.format === 'landscape' ? '16:9' : '9:16';
-            const fitLabel = { smart_background: 'Smart BG', contain_pad: 'Contain', cover_crop: 'Cover' }[project.fit_mode] || project.fit_mode;
+            const fitLabel = { smart_background: 'Fundo Intel.', contain_pad: 'Com barras', cover_crop: 'Com corte' }[project.fit_mode] || project.fit_mode;
+            const trackCount = (project.tracks || []).length;
             return `
                 <div class="bg-gray-800 rounded-lg p-5 hover:bg-gray-750 cursor-pointer transition-colors border border-gray-700 hover:border-indigo-500/30"
                      onclick="Projects.open('${project.id}')">
@@ -45,10 +46,11 @@ const Projects = {
                             </svg>
                         </button>
                     </div>
-                    <div class="flex gap-2 text-xs">
+                    <div class="flex flex-wrap gap-1.5 text-xs">
                         <span class="px-2 py-0.5 bg-gray-700 rounded text-gray-400">${formatLabel}</span>
                         <span class="px-2 py-0.5 bg-gray-700 rounded text-gray-400">${fitLabel}</span>
                         <span class="px-2 py-0.5 bg-gray-700 rounded text-gray-400">${project.fps}fps</span>
+                        <span class="px-2 py-0.5 bg-indigo-900/50 rounded text-indigo-400">${trackCount} trilha${trackCount !== 1 ? 's' : ''}</span>
                     </div>
                     <p class="text-xs text-gray-500 mt-3">${new Date(project.created_at).toLocaleDateString('pt-BR')}</p>
                 </div>

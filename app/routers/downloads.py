@@ -38,6 +38,17 @@ def list_outputs(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    # Only show outputs if the latest job for this project completed successfully
+    latest_job = (
+        db.query(Job)
+        .filter(Job.project_id == project_id)
+        .order_by(Job.created_at.desc())
+        .first()
+    )
+    if not latest_job or latest_job.status != "done":
+        return []
+
     return _get_output_files(project_id)
 
 
@@ -48,6 +59,16 @@ def download_output(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
+    # Verify the latest job is done before allowing download
+    latest_job = (
+        db.query(Job)
+        .filter(Job.project_id == project_id)
+        .order_by(Job.created_at.desc())
+        .first()
+    )
+    if not latest_job or latest_job.status != "done":
+        raise HTTPException(status_code=400, detail="Renderização ainda não concluída")
+
     filepath = os.path.join(
         settings.CURRENT_SECTION_PATH, "projects", project_id, "output", filename
     )

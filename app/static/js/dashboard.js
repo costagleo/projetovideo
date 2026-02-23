@@ -173,6 +173,7 @@ const Dashboard = {
             'running': 'badge badge-running',
             'done': 'badge badge-done',
             'failed': 'badge badge-failed',
+            'error': 'badge badge-failed',
         };
         return map[status] || 'badge';
     },
@@ -183,6 +184,7 @@ const Dashboard = {
             'running': 'Rodando',
             'done': 'Concluído',
             'failed': 'Erro',
+            'error': 'Erro',
         };
         return map[status] || status;
     },

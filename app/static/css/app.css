@@ -269,6 +269,35 @@
         background: rgba(0, 0, 0, 0.5);
         z-index: 40;
     }
+
+    .drop-zone {
+        padding: 1.25rem;
+    }
+
+    .image-grid {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        gap: 0.5rem;
+    }
+
+    .image-thumb .delete-btn {
+        opacity: 1;
+    }
+
+    .log-viewer {
+        font-size: 0.65rem;
+        max-height: 250px;
+    }
+
+    .toast-container {
+        bottom: 1rem;
+        right: 1rem;
+        left: 1rem;
+    }
+
+    .toast {
+        font-size: 0.8rem;
+        max-width: 100%;
+    }
 }
 
 /* Modal / Confirm dialog */

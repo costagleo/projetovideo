@@ -3,9 +3,16 @@
  */
 const Jobs = {
     list: [],
+    projectNames: {},
     pollInterval: null,
 
     async load() {
+        // Preload project names for display
+        try {
+            const projects = await API.get('/api/projects');
+            this.projectNames = {};
+            projects.forEach(p => { this.projectNames[p.id] = p.name; });
+        } catch {}
         await this.refresh();
         this.startPolling();
     },
@@ -37,16 +44,18 @@ const Jobs = {
         container.innerHTML = this.list.map(job => {
             const progress = Math.round(job.progress * 100);
             const eta = job.eta_s ? this.formatEta(job.eta_s) : '';
+            const projectName = this.projectNames[job.project_id] || job.project_id.substring(0, 8) + '...';
+            const isError = job.status === 'failed' || job.status === 'error';
 
             return `
-                <div class="bg-gray-800 rounded-lg p-5 border border-gray-700">
-                    <div class="flex items-center justify-between mb-3">
-                        <div class="flex items-center gap-3">
-                            <span class="text-sm font-medium">${job.project_id.substring(0, 8)}...</span>
-                            <span class="${Dashboard.statusBadgeClass(job.status)}">${Dashboard.statusLabel(job.status)}</span>
+                <div class="bg-gray-800 rounded-lg p-4 md:p-5 border border-gray-700">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="text-sm font-medium truncate">${this.escapeHtml(projectName)}</span>
+                            <span class="${Dashboard.statusBadgeClass(job.status)} flex-shrink-0">${Dashboard.statusLabel(job.status)}</span>
                         </div>
-                        <div class="flex items-center gap-2">
-                            ${job.status === 'running' && eta ? `<span class="text-xs text-gray-400">ETA: ${eta}</span>` : ''}
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            ${job.status === 'running' && eta ? `<span class="text-xs text-gray-400 hidden sm:inline">ETA: ${eta}</span>` : ''}
                             <button onclick="Jobs.showLog('${job.id}')" class="p-1.5 text-gray-400 hover:text-indigo-400 transition-colors" title="Ver log">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -60,11 +69,12 @@ const Jobs = {
                     </div>
                     <div class="flex justify-between text-xs text-gray-500">
                         <span>${progress}%</span>
+                        ${job.status === 'running' && eta ? `<span class="sm:hidden">ETA: ${eta}</span>` : ''}
                         <span>${Dashboard.timeAgo(job.created_at)}</span>
                     </div>
                     ` : ''}
-                    ${job.status === 'failed' && job.error_msg ? `
-                    <p class="text-red-400 text-sm mt-2">${this.escapeHtml(job.error_msg)}</p>
+                    ${isError && job.error_msg ? `
+                    <p class="text-red-400 text-xs sm:text-sm mt-2 break-words">${this.escapeHtml(job.error_msg)}</p>
                     ` : ''}
                 </div>
             `;
