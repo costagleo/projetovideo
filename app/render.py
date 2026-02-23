@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, joinedload
 
 from app.config import get_settings
 from app.models import Job, Project, Track, Image
@@ -42,50 +42,58 @@ def _get_resolution(fmt: str) -> tuple[int, int]:
     return 1920, 1080  # landscape default
 
 
-def _build_ffmpeg_filter(fit_mode: str, width: int, height: int) -> str:
-    """Build the FFmpeg filter_complex for image fitting."""
+def _preprocess_image(img_path: str, out_path: str, fit_mode: str, width: int, height: int):
+    """Pre-process a single image to target resolution with fit mode applied.
+    This produces a single frame at the exact output resolution, so the main
+    encode loop doesn't need any expensive per-frame filtering."""
+
     if fit_mode == "smart_background":
-        # Background: blurred cover; Foreground: contain (fit)
-        return (
+        filter_complex = (
             f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
             f"crop={width}:{height},boxblur=20:5[bg];"
             f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0[fg];"
-            f"[bg][fg]overlay=0:0"
+            f"[bg][fg]overlay=0:0[out]"
         )
+        cmd = [
+            "ffmpeg", "-y", "-i", img_path,
+            "-filter_complex", filter_complex,
+            "-map", "[out]",
+            "-frames:v", "1",
+            out_path,
+        ]
     elif fit_mode == "contain_pad":
-        return (
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black"
-        )
+        cmd = [
+            "ffmpeg", "-y", "-i", img_path,
+            "-vf", (
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black"
+            ),
+            "-frames:v", "1",
+            out_path,
+        ]
     elif fit_mode == "cover_crop":
-        return (
-            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height}"
-        )
-    # Default to smart_background
-    return _build_ffmpeg_filter("smart_background", width, height)
+        cmd = [
+            "ffmpeg", "-y", "-i", img_path,
+            "-vf", (
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height}"
+            ),
+            "-frames:v", "1",
+            out_path,
+        ]
+    else:
+        # Default to smart_background
+        return _preprocess_image(img_path, out_path, "smart_background", width, height)
 
-
-def _build_slideshow_input(images: list[Image], duration_ms: int, transition_s: float) -> list[str]:
-    """Build FFmpeg input arguments for a slideshow of images."""
-    n_images = len(images)
-    if n_images == 0:
-        return []
-
-    # Duration per image in seconds
-    total_s = duration_ms / 1000.0
-    per_image_s = total_s / n_images
-
-    args = []
-    for img in sorted(images, key=lambda x: x.order_index):
-        args.extend(["-loop", "1", "-t", f"{per_image_s:.3f}", "-i", img.path])
-
-    return args
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise RuntimeError(f"Image preprocessing failed for {img_path}: {result.stderr[-300:]}")
 
 
 def _render_track(
     track: Track,
+    images: list[Image],
     project: Project,
     output_path: str,
     log_path: str,
@@ -93,7 +101,6 @@ def _render_track(
 ):
     """Render a single track (audio + images) to video."""
     width, height = _get_resolution(project.format)
-    images = sorted(track.images, key=lambda x: x.order_index)
     n_images = len(images)
 
     if n_images == 0 or not track.audio_path:
@@ -103,57 +110,40 @@ def _render_track(
     total_s = duration_ms / 1000.0
     per_image_s = total_s / n_images
 
-    # Build FFmpeg command
+    # Pre-process images to target resolution (fast, done once per image)
+    project_dir = os.path.dirname(os.path.dirname(output_path))
+    tmp_dir = os.path.join(project_dir, "tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    preprocessed = []
+    for idx, img in enumerate(images):
+        pp_path = os.path.join(tmp_dir, f"pp_{track.order_index}_{idx}.png")
+        _preprocess_image(img.path, pp_path, project.fit_mode, width, height)
+        preprocessed.append(pp_path)
+
+    # Build FFmpeg command using pre-processed images (no filters needed)
     cmd = ["ffmpeg", "-y"]
 
-    # Add image inputs
-    for img in images:
-        cmd.extend(["-loop", "1", "-t", f"{per_image_s:.3f}", "-i", img.path])
+    for pp_path in preprocessed:
+        cmd.extend(["-loop", "1", "-t", f"{per_image_s:.3f}", "-i", pp_path])
 
     # Add audio input
     cmd.extend(["-i", track.audio_path])
 
-    # Build filter complex
-    audio_idx = n_images  # audio is the last input
+    audio_idx = n_images
 
     if n_images == 1:
-        if project.fit_mode == "smart_background":
-            filter_complex = (
-                f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},boxblur=20:5[bg];"
-                f"[0:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0[fg];"
-                f"[bg][fg]overlay=0:0[outv]"
-            )
-        else:
-            fit_filter = _build_ffmpeg_filter(project.fit_mode, width, height)
-            filter_complex = f"[0:v]{fit_filter}[outv]"
+        # Single image: direct mapping, no filter needed (already preprocessed)
         cmd.extend([
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
+            "-map", "0:v",
             "-map", f"{audio_idx}:a",
         ])
     else:
+        # Multiple images: concat pre-processed streams
         filter_parts = []
         for i in range(n_images):
-            if project.fit_mode == "smart_background":
-                # For each image: create blurred bg + sharp fg overlay
-                filter_parts.append(
-                    f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-                    f"crop={width}:{height},boxblur=20:5[bg{i}]"
-                )
-                filter_parts.append(
-                    f"[{i}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black@0[fg{i}]"
-                )
-                filter_parts.append(
-                    f"[bg{i}][fg{i}]overlay=0:0,setpts=PTS-STARTPTS[v{i}]"
-                )
-            else:
-                fit_filter = _build_ffmpeg_filter(project.fit_mode, width, height)
-                filter_parts.append(f"[{i}:v]{fit_filter},setpts=PTS-STARTPTS[v{i}]")
+            filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
 
-        # Concat all processed video streams
         concat_inputs = "".join(f"[v{i}]" for i in range(n_images))
         filter_parts.append(f"{concat_inputs}concat=n={n_images}:v=1:a=0[outv]")
 
@@ -195,7 +185,8 @@ def _render_track(
     )
 
     log_file = open(log_path, "w")
-    log_file.write(f"Command: {' '.join(cmd)}\n\n")
+    log_file.write(f"Command: {' '.join(cmd)}\n")
+    log_file.write(f"Images: {n_images}, Per-image: {per_image_s:.3f}s, Total: {total_s:.3f}s\n\n")
 
     duration_us = duration_ms * 1000  # microseconds
 
@@ -224,6 +215,17 @@ def _render_track(
     log_file.write(f"\nReturn code: {process.returncode}\n")
     log_file.close()
 
+    # Cleanup preprocessed images
+    for pp_path in preprocessed:
+        try:
+            os.remove(pp_path)
+        except OSError:
+            pass
+    try:
+        os.rmdir(tmp_dir)
+    except OSError:
+        pass
+
     if process.returncode != 0:
         raise RuntimeError(f"FFmpeg failed (code {process.returncode}): {stderr_output[-500:]}")
 
@@ -241,8 +243,10 @@ def execute_render(job_id: str):
             _update_job(job_id, status="error", error_msg="Projeto não encontrado")
             return
 
+        # Eager-load tracks AND their images to avoid lazy loading issues
         tracks = (
             db.query(Track)
+            .options(joinedload(Track.images))
             .filter(Track.project_id == project.id)
             .order_by(Track.order_index)
             .all()
@@ -266,11 +270,15 @@ def execute_render(job_id: str):
         _update_job(job_id, log_path=log_path)
 
         for track in tracks:
+            # Sort images explicitly from the eager-loaded list
+            track_images = sorted(track.images, key=lambda x: x.order_index)
+
             output_filename = f"{project.name}_track{track.order_index}.mp4"
             output_path = os.path.join(output_dir, output_filename)
 
             _render_track(
                 track=track,
+                images=track_images,
                 project=project,
                 output_path=output_path,
                 log_path=log_path,
