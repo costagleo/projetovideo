@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     REGISTRATION_MODE: str = "invite_only"
 
     # Limits
-    MAX_PROJECT_BYTES: int = 3_221_225_472  # 3 GB
+    MAX_PROJECT_BYTES: int = 21_474_836_480  # 20 GB
     WORKER_CONCURRENCY: int = 1
     DEFAULT_PRESET: str = "balanced"
 

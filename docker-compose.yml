@@ -1,5 +1,9 @@
 version: "3.8"
 
+# =============================================
+# DEV LOCAL — docker-compose up
+# =============================================
+
 services:
   redis:
     image: redis:7-alpine
