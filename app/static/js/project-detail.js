@@ -282,7 +282,7 @@ const ProjectDetail = {
         if (!this.projectId) return;
         try {
             await API.post(`/api/projects/${this.projectId}/render`);
-            Toast.success('Job de renderização criado!');
+            Toast.success('Renderização enviada para processamento!');
             Dashboard.navigate('jobs');
         } catch (err) {
             Toast.error(err.message);

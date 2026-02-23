@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -125,7 +127,32 @@ def get_job_log(
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
-    if not job.log_path or not __import__("os").path.exists(job.log_path):
+    if not job.log_path or not os.path.exists(job.log_path):
         return {"log": ""}
     with open(job.log_path, "r") as f:
         return {"log": f.read()}
+
+
+@router.delete("/api/jobs/{job_id}", response_model=MessageResponse)
+def delete_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+
+    if job.status == "running":
+        raise HTTPException(status_code=400, detail="Não é possível excluir um job em execução")
+
+    # Delete log file if exists
+    if job.log_path and os.path.exists(job.log_path):
+        try:
+            os.remove(job.log_path)
+        except OSError:
+            pass
+
+    db.delete(job)
+    db.commit()
+    return MessageResponse(message="Job removido")

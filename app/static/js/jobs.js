@@ -22,7 +22,7 @@ const Jobs = {
             this.list = await API.get('/api/jobs');
             this.render();
         } catch (err) {
-            Toast.error('Erro ao carregar jobs: ' + err.message);
+            Toast.error('Erro ao carregar processamentos: ' + err.message);
         }
     },
 
@@ -35,7 +35,7 @@ const Jobs = {
                     <svg class="w-16 h-16 mx-auto mb-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                     </svg>
-                    <p class="text-gray-500">Nenhum job na fila</p>
+                    <p class="text-gray-500">Nenhum processamento na fila</p>
                 </div>
             `;
             return;
@@ -61,6 +61,12 @@ const Jobs = {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                 </svg>
                             </button>
+                            ${job.status !== 'running' ? `
+                            <button onclick="Jobs.deleteJob('${job.id}')" class="p-1.5 text-gray-400 hover:text-red-400 transition-colors" title="Excluir">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                                </svg>
+                            </button>` : ''}
                         </div>
                     </div>
                     ${job.status === 'running' || job.status === 'done' ? `
@@ -111,6 +117,17 @@ const Jobs = {
 
     hideLog() {
         document.getElementById('job-log-modal').classList.add('hidden');
+    },
+
+    async deleteJob(jobId) {
+        if (!await Dashboard.confirm('Excluir Processamento', 'Tem certeza que deseja excluir este item?')) return;
+        try {
+            await API.delete(`/api/jobs/${jobId}`);
+            Toast.success('Processamento removido');
+            this.refresh();
+        } catch (err) {
+            Toast.error(err.message);
+        }
     },
 
     formatEta(seconds) {

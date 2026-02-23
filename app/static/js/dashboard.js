@@ -110,7 +110,7 @@ const Dashboard = {
         try {
             const result = await API.post('/api/section/render_all');
             const count = Array.isArray(result) ? result.length : 0;
-            Toast.success(`${count} job(s) criado(s)!`);
+            Toast.success(`${count} processamento(s) criado(s)!`);
             this.navigate('jobs');
         } catch (err) {
             Toast.error(err.message);

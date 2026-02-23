@@ -6,6 +6,9 @@ import os
 import subprocess
 import time
 from datetime import datetime, timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, joinedload
@@ -34,6 +37,24 @@ def _update_job(job_id: str, **kwargs):
             db.commit()
     finally:
         db.close()
+
+
+def _probe_duration_ms(audio_path: str) -> int | None:
+    """Probe actual audio duration using ffprobe at render time."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "csv=p=0",
+                audio_path,
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        seconds = float(result.stdout.strip())
+        return int(seconds * 1000)
+    except Exception:
+        return None
 
 
 def _get_resolution(fmt: str) -> tuple[int, int]:
@@ -106,7 +127,13 @@ def _render_track(
     if n_images == 0 or not track.audio_path:
         raise ValueError("Track must have audio and at least one image")
 
-    duration_ms = track.duration_ms or 180_000  # fallback 3 min
+    # Probe actual audio duration at render time (don't trust stored value)
+    probed_ms = _probe_duration_ms(track.audio_path)
+    duration_ms = probed_ms or track.duration_ms or 180_000  # fallback 3 min
+    logger.info(
+        "Track %s: stored_ms=%s, probed_ms=%s, using=%s",
+        track.order_index, track.duration_ms, probed_ms, duration_ms,
+    )
     total_s = duration_ms / 1000.0
     per_image_s = total_s / n_images
 
