@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  video_api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - video_data:/data
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/data
+      - DB_PATH=/data/db/app.db
+      - MASTER_EMAIL=admin@axidia.com.br
+      - MASTER_PASSWORD=admin
+      - REGISTRATION_MODE=invite_only
+      - MAX_PROJECT_BYTES=3221225472
+      - CURRENT_SECTION_PATH=/data/projects/current
+      - BASE_URL=http://localhost:8000
+    depends_on:
+      - redis
+
+  video_worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    command: rq worker -u redis://redis:6379/0 video_jobs
+    volumes:
+      - .:/app
+      - video_data:/data
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/data
+      - DB_PATH=/data/db/app.db
+      - WORKER_CONCURRENCY=1
+      - CURRENT_SECTION_PATH=/data/projects/current
+      - DEFAULT_PRESET=balanced
+    depends_on:
+      - redis
+
+volumes:
+  video_data:
+  redis_data:
