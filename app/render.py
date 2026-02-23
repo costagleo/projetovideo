@@ -120,8 +120,17 @@ def _render_track(
     log_path: str,
     job_id: str,
 ):
-    """Render a single track (audio + images) to video."""
+    """Render a single track (audio + images) to video.
+
+    Uses the FFmpeg concat demuxer instead of -loop 1 + concat filter.
+    This avoids:
+      - Huge dup_frames from mismatched input/output framerates
+      - Long stalls at startup (N/A progress for many seconds)
+      - Stalls at image transition points (concat filter bottleneck)
+      - Slow encoding speed from repeatedly decoding looped images
+    """
     width, height = _get_resolution(project.format)
+    fps = project.fps
     n_images = len(images)
 
     if n_images == 0 or not track.audio_path:
@@ -148,38 +157,31 @@ def _render_track(
         _preprocess_image(img.path, pp_path, project.fit_mode, width, height)
         preprocessed.append(pp_path)
 
-    # Build FFmpeg command using pre-processed images (no filters needed)
-    cmd = ["ffmpeg", "-y"]
+    # Calculate frames per image to avoid fractional durations
+    frames_per_image = max(1, round(per_image_s * fps))
 
-    for pp_path in preprocessed:
-        cmd.extend(["-loop", "1", "-t", f"{per_image_s:.3f}", "-i", pp_path])
+    # Build concat demuxer input file listing each image with its duration
+    concat_list_path = os.path.join(tmp_dir, f"concat_{track.order_index}.txt")
+    with open(concat_list_path, "w") as f:
+        for pp_path in preprocessed:
+            # Use forward slashes for FFmpeg compatibility
+            safe_path = pp_path.replace("\\", "/")
+            f.write(f"file '{safe_path}'\n")
+            f.write(f"duration {frames_per_image / fps:.6f}\n")
+        # Repeat last entry so the final image displays correctly
+        safe_path = preprocessed[-1].replace("\\", "/")
+        f.write(f"file '{safe_path}'\n")
 
-    # Add audio input
-    cmd.extend(["-i", track.audio_path])
-
-    audio_idx = n_images
-
-    if n_images == 1:
-        # Single image: direct mapping, no filter needed (already preprocessed)
-        cmd.extend([
-            "-map", "0:v",
-            "-map", f"{audio_idx}:a",
-        ])
-    else:
-        # Multiple images: concat pre-processed streams
-        filter_parts = []
-        for i in range(n_images):
-            filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
-
-        concat_inputs = "".join(f"[v{i}]" for i in range(n_images))
-        filter_parts.append(f"{concat_inputs}concat=n={n_images}:v=1:a=0[outv]")
-
-        filter_complex = ";".join(filter_parts)
-        cmd.extend([
-            "-filter_complex", filter_complex,
-            "-map", "[outv]",
-            "-map", f"{audio_idx}:a",
-        ])
+    # Build FFmpeg command using concat demuxer (much faster than -loop 1)
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_list_path,
+        "-i", track.audio_path,
+        "-map", "0:v",
+        "-map", "1:a",
+    ]
 
     # Output settings
     preset_map = {
@@ -195,7 +197,7 @@ def _render_track(
         "-crf", "23",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-r", str(project.fps),
+        "-r", str(fps),
         "-shortest",
         "-pix_fmt", "yuv420p",
         "-progress", "pipe:1",
@@ -213,26 +215,40 @@ def _render_track(
 
     log_file = open(log_path, "w")
     log_file.write(f"Command: {' '.join(cmd)}\n")
-    log_file.write(f"Images: {n_images}, Per-image: {per_image_s:.3f}s, Total: {total_s:.3f}s\n\n")
+    log_file.write(
+        f"Images: {n_images}, Per-image: {per_image_s:.3f}s "
+        f"({frames_per_image} frames @ {fps}fps), Total: {total_s:.3f}s\n\n"
+    )
 
     duration_us = duration_ms * 1000  # microseconds
+    last_progress_update = 0.0
 
     for line in process.stdout:
         log_file.write(line)
 
         # Parse progress from FFmpeg's -progress output
         if line.startswith("out_time_us="):
+            raw_value = line.split("=", 1)[1].strip()
+            # Skip N/A values that occur during initialization
+            if raw_value == "N/A":
+                continue
             try:
-                out_time_us = int(line.split("=")[1].strip())
+                out_time_us = int(raw_value)
+                if out_time_us < 0:
+                    continue
                 if duration_us > 0:
                     progress = min(out_time_us / duration_us, 1.0)
-                    elapsed = time.time() - start_time
-                    eta = (elapsed / progress - elapsed) if progress > 0.01 else None
-                    _update_job(
-                        job_id,
-                        progress=round(progress, 4),
-                        eta_s=round(eta, 1) if eta else None,
-                    )
+                    # Throttle DB updates: only write when progress changes
+                    # by at least 0.5% to reduce DB pressure
+                    if progress - last_progress_update >= 0.005 or progress >= 1.0:
+                        elapsed = time.time() - start_time
+                        eta = (elapsed / progress - elapsed) if progress > 0.01 else None
+                        _update_job(
+                            job_id,
+                            progress=round(progress, 4),
+                            eta_s=round(eta, 1) if eta else None,
+                        )
+                        last_progress_update = progress
             except (ValueError, ZeroDivisionError):
                 pass
 
@@ -242,12 +258,16 @@ def _render_track(
     log_file.write(f"\nReturn code: {process.returncode}\n")
     log_file.close()
 
-    # Cleanup preprocessed images
+    # Cleanup preprocessed images and concat list
     for pp_path in preprocessed:
         try:
             os.remove(pp_path)
         except OSError:
             pass
+    try:
+        os.remove(concat_list_path)
+    except OSError:
+        pass
     try:
         os.rmdir(tmp_dir)
     except OSError:
