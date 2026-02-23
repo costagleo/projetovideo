@@ -119,15 +119,14 @@ def _render_track(
     output_path: str,
     log_path: str,
     job_id: str,
+    track_index: int,
+    total_tracks: int,
 ):
     """Render a single track (audio + images) to video.
 
     Uses the FFmpeg concat demuxer instead of -loop 1 + concat filter.
-    This avoids:
-      - Huge dup_frames from mismatched input/output framerates
-      - Long stalls at startup (N/A progress for many seconds)
-      - Stalls at image transition points (concat filter bottleneck)
-      - Slow encoding speed from repeatedly decoding looped images
+    Progress is mapped to the overall job range based on track_index/total_tracks
+    so multi-track projects show a single continuous 0-100% progress bar.
     """
     width, height = _get_resolution(project.format)
     fps = project.fps
@@ -204,6 +203,11 @@ def _render_track(
         output_path,
     ])
 
+    # Progress range for this track within the overall job
+    # e.g. track 0 of 2 => 0.0–0.5, track 1 of 2 => 0.5–1.0
+    progress_base = track_index / total_tracks
+    progress_span = 1.0 / total_tracks
+
     # Execute FFmpeg with progress parsing
     start_time = time.time()
     process = subprocess.Popen(
@@ -213,7 +217,7 @@ def _render_track(
         text=True,
     )
 
-    log_file = open(log_path, "w")
+    log_file = open(log_path, "a")
     log_file.write(f"Command: {' '.join(cmd)}\n")
     log_file.write(
         f"Images: {n_images}, Per-image: {per_image_s:.3f}s "
@@ -221,7 +225,7 @@ def _render_track(
     )
 
     duration_us = duration_ms * 1000  # microseconds
-    last_progress_update = 0.0
+    last_progress_update = -1.0
 
     for line in process.stdout:
         log_file.write(line)
@@ -237,18 +241,27 @@ def _render_track(
                 if out_time_us < 0:
                     continue
                 if duration_us > 0:
-                    progress = min(out_time_us / duration_us, 1.0)
+                    track_progress = min(out_time_us / duration_us, 1.0)
+                    # Map track progress to overall job progress
+                    overall_progress = progress_base + track_progress * progress_span
+                    overall_progress = min(overall_progress, progress_base + progress_span)
                     # Throttle DB updates: only write when progress changes
                     # by at least 0.5% to reduce DB pressure
-                    if progress - last_progress_update >= 0.005 or progress >= 1.0:
+                    if overall_progress - last_progress_update >= 0.005:
                         elapsed = time.time() - start_time
-                        eta = (elapsed / progress - elapsed) if progress > 0.01 else None
+                        if track_progress > 0.01:
+                            # ETA for remaining tracks + this track's remaining time
+                            track_eta = (elapsed / track_progress - elapsed)
+                            remaining_tracks_s = track_eta * (total_tracks - track_index - 1) / max(1, total_tracks - track_index)
+                            eta = track_eta + remaining_tracks_s
+                        else:
+                            eta = None
                         _update_job(
                             job_id,
-                            progress=round(progress, 4),
+                            progress=round(overall_progress, 4),
                             eta_s=round(eta, 1) if eta else None,
                         )
-                        last_progress_update = progress
+                        last_progress_update = overall_progress
             except (ValueError, ZeroDivisionError):
                 pass
 
@@ -257,6 +270,15 @@ def _render_track(
     log_file.write(f"\nSTDERR:\n{stderr_output}\n")
     log_file.write(f"\nReturn code: {process.returncode}\n")
     log_file.close()
+
+    # Mark this track's slice as complete regardless of final out_time_us
+    track_end_progress = progress_base + progress_span
+    if process.returncode == 0 and last_progress_update < track_end_progress:
+        _update_job(
+            job_id,
+            progress=round(track_end_progress, 4),
+            eta_s=0 if track_index == total_tracks - 1 else None,
+        )
 
     # Cleanup preprocessed images and concat list
     for pp_path in preprocessed:
@@ -316,7 +338,13 @@ def execute_render(job_id: str):
         log_path = os.path.join(logs_dir, f"job_{job_id}.log")
         _update_job(job_id, log_path=log_path)
 
-        for track in tracks:
+        total_tracks = len(tracks)
+
+        # Initialize log file (tracks append to it)
+        with open(log_path, "w") as f:
+            f.write(f"Project: {project.name} ({total_tracks} tracks)\n\n")
+
+        for i, track in enumerate(tracks):
             # Sort images explicitly from the eager-loaded list
             track_images = sorted(track.images, key=lambda x: x.order_index)
 
@@ -330,6 +358,8 @@ def execute_render(job_id: str):
                 output_path=output_path,
                 log_path=log_path,
                 job_id=job_id,
+                track_index=i,
+                total_tracks=total_tracks,
             )
 
         # Mark as done
