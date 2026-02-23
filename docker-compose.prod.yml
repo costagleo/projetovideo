@@ -1,14 +1,21 @@
 version: "3.8"
 
 # =============================================
-# PRODUÇÃO — Portainer Stack (Swarm + Traefik)
-# Redis externo: github-gerador-relatorios_redis
+# PRODUÇÃO — Portainer Stack (Git Deploy + Swarm + Traefik)
+# Repo: https://github.com/costagleo/projetovideo.git
+# Redis externo: github-gerador-relatorios_redis:6379/1
 # URL: video.axidia.com.br
+#
+# VARIÁVEIS SENSÍVEIS — configure no Portainer (Stack > Environment):
+#   MASTER_EMAIL, MASTER_PASSWORD, SECRET_KEY
 # =============================================
 
 services:
   video_api:
-    image: axidia/video-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: video-api:latest
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     networks:
       - interna
@@ -16,18 +23,25 @@ services:
     volumes:
       - video_data:/data
     environment:
-      - REDIS_URL=redis://github-gerador-relatorios_redis:6379/1
-      - DATA_DIR=/data
-      - DB_PATH=/data/db/app.db
-      - MASTER_EMAIL=${MASTER_EMAIL}
-      - MASTER_PASSWORD=${MASTER_PASSWORD}
-      - SECRET_KEY=${SECRET_KEY}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
-      - ALGORITHM=${ALGORITHM:-HS256}
-      - REGISTRATION_MODE=invite_only
-      - MAX_PROJECT_BYTES=21474836480
-      - CURRENT_SECTION_PATH=/data/projects/current
-      - BASE_URL=https://video.axidia.com.br
+      # --- Conexões ---
+      REDIS_URL: "redis://github-gerador-relatorios_redis:6379/1"
+      DB_PATH: "/data/db/app.db"
+      DATA_DIR: "/data"
+      CURRENT_SECTION_PATH: "/data/projects/current"
+      # --- Sensíveis (definir no Portainer > Stack > Environment variables) ---
+      MASTER_EMAIL: "${MASTER_EMAIL:-admin@axidia.com.br}"
+      MASTER_PASSWORD: "${MASTER_PASSWORD:?Defina MASTER_PASSWORD no Portainer}"
+      SECRET_KEY: "${SECRET_KEY:?Defina SECRET_KEY no Portainer}"
+      # --- Auth ---
+      ACCESS_TOKEN_EXPIRE_MINUTES: "1440"
+      ALGORITHM: "HS256"
+      REGISTRATION_MODE: "invite_only"
+      # --- Limites ---
+      MAX_PROJECT_BYTES: "21474836480"
+      WORKER_CONCURRENCY: "1"
+      DEFAULT_PRESET: "balanced"
+      # --- App ---
+      BASE_URL: "https://video.axidia.com.br"
     deploy:
       replicas: 1
       resources:
@@ -43,19 +57,22 @@ services:
         traefik.http.services.video.loadbalancer.server.port: "8000"
 
   video_worker:
-    image: axidia/video-worker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: video-worker:latest
     command: rq worker -u redis://github-gerador-relatorios_redis:6379/1 video_jobs
     networks:
       - interna
     volumes:
       - video_data:/data
     environment:
-      - REDIS_URL=redis://github-gerador-relatorios_redis:6379/1
-      - DATA_DIR=/data
-      - DB_PATH=/data/db/app.db
-      - WORKER_CONCURRENCY=1
-      - CURRENT_SECTION_PATH=/data/projects/current
-      - DEFAULT_PRESET=balanced
+      REDIS_URL: "redis://github-gerador-relatorios_redis:6379/1"
+      DB_PATH: "/data/db/app.db"
+      DATA_DIR: "/data"
+      CURRENT_SECTION_PATH: "/data/projects/current"
+      WORKER_CONCURRENCY: "1"
+      DEFAULT_PRESET: "balanced"
     deploy:
       replicas: 1
       resources:
