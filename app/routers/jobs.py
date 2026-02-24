@@ -9,7 +9,7 @@ from app.models import Job, Project, Section, Track, User
 from app.schemas import JobOut, MessageResponse
 from app.auth import get_current_user
 from app.config import get_settings
-from app.worker import enqueue_render
+from app.worker import enqueue_render, request_cancel
 
 router = APIRouter(tags=["Jobs"])
 settings = get_settings()
@@ -143,6 +143,12 @@ def delete_job(
     job = db.query(Job).filter(Job.id == job_id, Job.created_by == current_user.id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
+
+    # Signal cancellation if the job is still active.
+    # This sets a Redis flag that the render loop detects to kill FFmpeg,
+    # and also cancels the RQ job if it's still queued.
+    if job.status in ("queued", "running"):
+        request_cancel(job.id)
 
     # Delete log file if exists
     if job.log_path and os.path.exists(job.log_path):
