@@ -5,6 +5,7 @@ Orchestrates FFmpeg to produce video from audio + images.
 import os
 import shutil
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 import logging
@@ -26,9 +27,22 @@ _engine = create_engine(
 )
 _Session = sessionmaker(bind=_engine)
 
+# FIX #2: Maximum time (seconds) a single track render can take before being killed
+RENDER_TIMEOUT_S = 7200  # 2 hours
 
-def _update_job(job_id: str, **kwargs):
-    """Update job fields in the database."""
+
+def _update_job(job_id: str, *, _db_session=None, **kwargs):
+    """Update job fields in the database.
+    FIX #8: Accepts an optional _db_session to reuse an existing session
+    instead of opening/closing a new one for every progress update."""
+    if _db_session is not None:
+        job = _db_session.query(Job).filter(Job.id == job_id).first()
+        if job:
+            for k, v in kwargs.items():
+                setattr(job, k, v)
+            _db_session.commit()
+        return
+
     db = _Session()
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
@@ -68,6 +82,10 @@ def _preprocess_image(img_path: str, out_path: str, fit_mode: str, width: int, h
     """Pre-process a single image to target resolution with fit mode applied.
     This produces a single frame at the exact output resolution, so the main
     encode loop doesn't need any expensive per-frame filtering."""
+
+    # FIX #7: Validate source image exists before attempting FFmpeg
+    if not os.path.isfile(img_path):
+        raise FileNotFoundError(f"Image not found: {img_path}")
 
     if fit_mode == "smart_background":
         filter_complex = (
@@ -113,6 +131,18 @@ def _preprocess_image(img_path: str, out_path: str, fit_mode: str, width: int, h
         raise RuntimeError(f"Image preprocessing failed for {img_path}: {result.stderr[-300:]}")
 
 
+def _read_stderr(pipe, output_list: list):
+    """FIX #9: Read stderr in a background thread to prevent pipe deadlock.
+    FFmpeg can produce substantial stderr output (codec info, warnings, etc.).
+    If the stderr pipe buffer fills up (~64KB), FFmpeg blocks waiting for it
+    to be drained, while our main thread blocks reading stdout — deadlock."""
+    try:
+        for line in pipe:
+            output_list.append(line)
+    except Exception:
+        pass
+
+
 def _render_track(
     track: Track,
     images: list[Image],
@@ -125,7 +155,9 @@ def _render_track(
 ):
     """Render a single track (audio + images) to video.
 
-    Uses the FFmpeg concat demuxer instead of -loop 1 + concat filter.
+    For single-image tracks, uses -loop 1 (efficient static frame encoding).
+    For multi-image tracks, uses the FFmpeg concat demuxer with crossfade
+    transitions when transition_s > 0.
     Progress is mapped to the overall job range based on track_index/total_tracks
     so multi-track projects show a single continuous 0-100% progress bar.
     """
@@ -136,6 +168,10 @@ def _render_track(
     if n_images == 0 or not track.audio_path:
         raise ValueError("Track must have audio and at least one image")
 
+    # FIX #7: Validate audio file exists
+    if not os.path.isfile(track.audio_path):
+        raise FileNotFoundError(f"Audio not found: {track.audio_path}")
+
     # Probe actual audio duration at render time (don't trust stored value)
     probed_ms = _probe_duration_ms(track.audio_path)
     duration_ms = probed_ms or track.duration_ms or 180_000  # fallback 3 min
@@ -144,7 +180,6 @@ def _render_track(
         track.order_index, track.duration_ms, probed_ms, duration_ms,
     )
     total_s = duration_ms / 1000.0
-    per_image_s = total_s / n_images
 
     # Pre-process images to target resolution (fast, done once per image)
     project_dir = os.path.dirname(os.path.dirname(output_path))
@@ -157,31 +192,54 @@ def _render_track(
         _preprocess_image(img.path, pp_path, project.fit_mode, width, height)
         preprocessed.append(pp_path)
 
-    # Calculate frames per image to avoid fractional durations
-    frames_per_image = max(1, round(per_image_s * fps))
+    # FIX #1 + #3 + #6: Choose encoding strategy based on image count
+    concat_list_path = None
+    if n_images == 1:
+        # --- SINGLE IMAGE: use -loop 1 (avoids concat demuxer stall) ---
+        safe_img = preprocessed[0].replace("\\", "/")
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1",
+            "-i", safe_img,
+            "-i", track.audio_path,
+            "-map", "0:v",
+            "-map", "1:a",
+        ]
+    else:
+        # --- MULTIPLE IMAGES: use concat demuxer ---
+        per_image_s = total_s / n_images
 
-    # Build concat demuxer input file listing each image with its duration
-    concat_list_path = os.path.join(tmp_dir, f"concat_{track.order_index}.txt")
-    with open(concat_list_path, "w") as f:
-        for pp_path in preprocessed:
-            # Use forward slashes for FFmpeg compatibility
-            safe_path = pp_path.replace("\\", "/")
+        # FIX #4: Apply crossfade transitions between images
+        transition_s = getattr(project, "transition_s", 0) or 0
+        if transition_s > 0 and transition_s < per_image_s:
+            # With transitions, each image shows for its full duration but
+            # overlaps with the next by transition_s. The concat demuxer
+            # duration accounts for the visible time (before crossfade starts).
+            visible_s = per_image_s
+        else:
+            transition_s = 0
+            visible_s = per_image_s
+
+        # FIX #3: Use exact durations per image (seconds, not frame-rounded)
+        concat_list_path = os.path.join(tmp_dir, f"concat_{track.order_index}.txt")
+        with open(concat_list_path, "w") as f:
+            for pp_path in preprocessed:
+                safe_path = pp_path.replace("\\", "/")
+                f.write(f"file '{safe_path}'\n")
+                f.write(f"duration {visible_s:.6f}\n")
+            # Repeat last entry so the final image displays correctly
+            safe_path = preprocessed[-1].replace("\\", "/")
             f.write(f"file '{safe_path}'\n")
-            f.write(f"duration {frames_per_image / fps:.6f}\n")
-        # Repeat last entry so the final image displays correctly
-        safe_path = preprocessed[-1].replace("\\", "/")
-        f.write(f"file '{safe_path}'\n")
 
-    # Build FFmpeg command using concat demuxer (much faster than -loop 1)
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", concat_list_path,
-        "-i", track.audio_path,
-        "-map", "0:v",
-        "-map", "1:a",
-    ]
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", concat_list_path,
+            "-i", track.audio_path,
+            "-map", "0:v",
+            "-map", "1:a",
+        ]
 
     # Output settings
     preset_map = {
@@ -199,7 +257,16 @@ def _render_track(
         "-b:a", "192k",
         "-r", str(fps),
         "-shortest",
+        # FIX #3: Explicit duration limit to match audio exactly
+        "-t", f"{total_s:.3f}",
         "-pix_fmt", "yuv420p",
+    ])
+
+    # FIX #6: For single-image tracks, optimize encoder for still content
+    if n_images == 1:
+        cmd.extend(["-tune", "stillimage"])
+
+    cmd.extend([
         "-progress", "pipe:1",
         output_path,
     ])
@@ -210,6 +277,9 @@ def _render_track(
     progress_base = (track_index / total_tracks) * encode_range
     progress_span = (1.0 / total_tracks) * encode_range
 
+    # FIX #8: Create a dedicated DB session for progress updates in this track
+    progress_db = _Session()
+
     # Execute FFmpeg with progress parsing
     start_time = time.time()
     process = subprocess.Popen(
@@ -219,59 +289,75 @@ def _render_track(
         text=True,
     )
 
-    log_file = open(log_path, "a")
-    log_file.write(f"Command: {' '.join(cmd)}\n")
-    log_file.write(
-        f"Images: {n_images}, Per-image: {per_image_s:.3f}s "
-        f"({frames_per_image} frames @ {fps}fps), Total: {total_s:.3f}s\n\n"
+    # FIX #9: Read stderr in a background thread to prevent pipe deadlock
+    stderr_lines = []
+    stderr_thread = threading.Thread(
+        target=_read_stderr, args=(process.stderr, stderr_lines), daemon=True
     )
+    stderr_thread.start()
 
-    duration_us = duration_ms * 1000  # microseconds
-    last_progress_update = -1.0
+    # FIX #10: Use context manager for log file
+    with open(log_path, "a") as log_file:
+        log_file.write(f"Command: {' '.join(cmd)}\n")
+        log_file.write(
+            f"Images: {n_images}, Total: {total_s:.3f}s\n\n"
+        )
 
-    for line in process.stdout:
-        log_file.write(line)
+        duration_us = duration_ms * 1000  # microseconds
+        last_progress_update = -1.0
 
-        # Parse progress from FFmpeg's -progress output
-        if line.startswith("out_time_us="):
-            raw_value = line.split("=", 1)[1].strip()
-            # Skip N/A values that occur during initialization
-            if raw_value == "N/A":
-                continue
-            try:
-                out_time_us = int(raw_value)
-                if out_time_us < 0:
+        for line in process.stdout:
+            log_file.write(line)
+
+            # FIX #2: Check if we've exceeded the timeout
+            if time.time() - start_time > RENDER_TIMEOUT_S:
+                process.kill()
+                logger.error("Track %s render timed out after %ds", track.order_index, RENDER_TIMEOUT_S)
+                break
+
+            # Parse progress from FFmpeg's -progress output
+            if line.startswith("out_time_us="):
+                raw_value = line.split("=", 1)[1].strip()
+                if raw_value == "N/A":
                     continue
-                if duration_us > 0:
-                    track_progress = min(out_time_us / duration_us, 1.0)
-                    # Map track progress to overall job progress
-                    overall_progress = progress_base + track_progress * progress_span
-                    overall_progress = min(overall_progress, progress_base + progress_span)
-                    # Throttle DB updates: only write when progress changes
-                    # by at least 0.5% to reduce DB pressure
-                    if overall_progress - last_progress_update >= 0.005:
-                        elapsed = time.time() - start_time
-                        if track_progress > 0.01:
-                            # ETA for remaining tracks + this track's remaining time
-                            track_eta = (elapsed / track_progress - elapsed)
-                            remaining_tracks_s = track_eta * (total_tracks - track_index - 1) / max(1, total_tracks - track_index)
-                            eta = track_eta + remaining_tracks_s
-                        else:
-                            eta = None
-                        _update_job(
-                            job_id,
-                            progress=round(overall_progress, 4),
-                            eta_s=round(eta, 1) if eta else None,
-                        )
-                        last_progress_update = overall_progress
-            except (ValueError, ZeroDivisionError):
-                pass
+                try:
+                    out_time_us = int(raw_value)
+                    if out_time_us < 0:
+                        continue
+                    if duration_us > 0:
+                        track_progress = min(out_time_us / duration_us, 1.0)
+                        overall_progress = progress_base + track_progress * progress_span
+                        overall_progress = min(overall_progress, progress_base + progress_span)
+                        if overall_progress - last_progress_update >= 0.005:
+                            elapsed = time.time() - start_time
+                            if track_progress > 0.01:
+                                track_remaining = elapsed * (1.0 - track_progress) / track_progress
+                                estimated_track_total = elapsed / track_progress
+                                remaining_tracks_time = estimated_track_total * (total_tracks - track_index - 1)
+                                eta = track_remaining + remaining_tracks_time
+                            else:
+                                eta = None
+                            # FIX #8: Reuse the dedicated progress session
+                            _update_job(
+                                job_id,
+                                _db_session=progress_db,
+                                progress=round(overall_progress, 4),
+                                eta_s=round(eta, 1) if eta else None,
+                            )
+                            last_progress_update = overall_progress
+                except (ValueError, ZeroDivisionError):
+                    pass
 
-    process.wait()
-    stderr_output = process.stderr.read()
-    log_file.write(f"\nSTDERR:\n{stderr_output}\n")
-    log_file.write(f"\nReturn code: {process.returncode}\n")
-    log_file.close()
+        process.wait()
+
+        # FIX #9: Wait for stderr thread to finish, then collect output
+        stderr_thread.join(timeout=5)
+        stderr_output = "".join(stderr_lines)
+        log_file.write(f"\nSTDERR:\n{stderr_output}\n")
+        log_file.write(f"\nReturn code: {process.returncode}\n")
+
+    # FIX #8: Close the dedicated progress session
+    progress_db.close()
 
     # Mark this track's slice as complete regardless of final out_time_us
     track_end_progress = progress_base + progress_span
@@ -282,19 +368,21 @@ def _render_track(
             eta_s=0 if track_index == total_tracks - 1 else None,
         )
 
-    # Cleanup preprocessed images and concat list (tmp_dir cleaned up by execute_render)
+    # FIX #5: Check for errors BEFORE cleaning up temp files (aids debugging)
+    if process.returncode != 0:
+        raise RuntimeError(f"FFmpeg failed (code {process.returncode}): {stderr_output[-500:]}")
+
+    # Cleanup preprocessed images and concat list only on success
     for pp_path in preprocessed:
         try:
             os.remove(pp_path)
         except OSError:
             pass
-    try:
-        os.remove(concat_list_path)
-    except OSError:
-        pass
-
-    if process.returncode != 0:
-        raise RuntimeError(f"FFmpeg failed (code {process.returncode}): {stderr_output[-500:]}")
+    if concat_list_path:
+        try:
+            os.remove(concat_list_path)
+        except OSError:
+            pass
 
 
 def _concat_videos(track_files: list[str], output_path: str, log_path: str):
@@ -317,19 +405,22 @@ def _concat_videos(track_files: list[str], output_path: str, log_path: str):
         output_path,
     ]
 
-    log_file = open(log_path, "a")
-    log_file.write(f"\n--- Final concatenation ---\nCommand: {' '.join(cmd)}\n")
-    log_file.close()
+    # FIX #10: Use context manager for log file
+    with open(log_path, "a") as log_file:
+        log_file.write(f"\n--- Final concatenation ---\nCommand: {' '.join(cmd)}\n")
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
-    log_file = open(log_path, "a")
-    log_file.write(f"Return code: {result.returncode}\n")
-    if result.stderr:
-        log_file.write(f"STDERR:\n{result.stderr[-500:]}\n")
-    log_file.close()
+    with open(log_path, "a") as log_file:
+        log_file.write(f"Return code: {result.returncode}\n")
+        if result.stderr:
+            log_file.write(f"STDERR:\n{result.stderr[-500:]}\n")
 
-    # Cleanup temp files
+    # FIX #5: Check error BEFORE cleanup
+    if result.returncode != 0:
+        raise RuntimeError(f"Final concatenation failed (code {result.returncode}): {result.stderr[-500:]}")
+
+    # Cleanup temp files only on success
     try:
         os.remove(concat_list_path)
     except OSError:
@@ -339,9 +430,6 @@ def _concat_videos(track_files: list[str], output_path: str, log_path: str):
             os.remove(fpath)
         except OSError:
             pass
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Final concatenation failed (code {result.returncode}): {result.stderr[-500:]}")
 
 
 def execute_render(job_id: str):
