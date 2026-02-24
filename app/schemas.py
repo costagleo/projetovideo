@@ -98,6 +98,7 @@ class TrackOut(BaseModel):
     id: str
     project_id: str
     audio_path: Optional[str] = None
+    audio_filename: Optional[str] = None
     duration_ms: Optional[int] = None
     order_index: int
     images: list["ImageOut"] = []

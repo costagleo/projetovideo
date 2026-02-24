@@ -66,6 +66,7 @@ async def upload_audio(
         f.write(content)
 
     track.audio_path = filepath
+    track.audio_filename = os.path.splitext(file.filename or "audio")[0]
     track.duration_ms = _get_audio_duration_ms(filepath)
     db.commit()
     db.refresh(track)

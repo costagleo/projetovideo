@@ -58,17 +58,20 @@ const ProjectDetail = {
         container.innerHTML = this.tracks.map((track, tIdx) => {
             const images = (track.images || []).sort((a, b) => a.order_index - b.order_index);
             const hasAudio = !!track.audio_path;
+            const audioName = track.audio_filename || '';
             const duration = Dashboard.formatDuration(track.duration_ms);
             const trackNum = tIdx + 1;
+            const trackTitle = audioName || `Trilha ${trackNum}`;
             const canDelete = this.tracks.length > 1;
 
             return `
                 <div class="bg-gray-800 rounded-lg p-4 md:p-5 border border-gray-700" data-track-id="${track.id}">
                     <!-- Track header -->
                     <div class="flex items-center justify-between mb-4">
-                        <div class="flex items-center gap-2">
-                            <div class="w-8 h-8 bg-indigo-600/30 rounded-full flex items-center justify-center text-indigo-400 text-sm font-bold">${trackNum}</div>
-                            <h3 class="font-semibold">Trilha ${trackNum}</h3>
+                        <div class="flex items-center gap-2 min-w-0">
+                            <div class="w-8 h-8 bg-indigo-600/30 rounded-full flex items-center justify-center text-indigo-400 text-sm font-bold flex-shrink-0">${trackNum}</div>
+                            <h3 class="font-semibold truncate">${this.escapeHtml(trackTitle)}</h3>
+                            ${hasAudio ? `<span class="text-xs text-gray-500 flex-shrink-0">${duration}</span>` : ''}
                         </div>
                         ${canDelete ? `
                         <button onclick="ProjectDetail.deleteTrack('${track.id}')" class="p-1.5 text-gray-500 hover:text-red-400 transition-colors" title="Remover trilha">
@@ -82,14 +85,13 @@ const ProjectDetail = {
                     <div class="mb-4">
                         <div class="flex items-center justify-between mb-2">
                             <span class="text-sm text-gray-400">Áudio</span>
-                            ${hasAudio ? `<span class="text-xs text-green-400">${duration}</span>` : ''}
                         </div>
                         ${hasAudio ? `
                         <div class="flex items-center gap-2 p-3 bg-gray-700/50 rounded-lg">
                             <svg class="w-5 h-5 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
                             </svg>
-                            <span class="text-sm text-green-400 truncate">Áudio enviado</span>
+                            <span class="text-sm text-green-400 truncate">${this.escapeHtml(audioName || 'Áudio enviado')}</span>
                             <button onclick="document.getElementById('audio-input-${track.id}').click()" class="ml-auto text-xs text-indigo-400 hover:text-indigo-300 flex-shrink-0">Substituir</button>
                         </div>
                         ` : `
@@ -324,6 +326,12 @@ const ProjectDetail = {
 
     hideEditModal() {
         document.getElementById('edit-project-modal').classList.add('hidden');
+    },
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 };
 

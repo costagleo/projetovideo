@@ -86,6 +86,7 @@ class Track(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     audio_path = Column(String, nullable=True)
+    audio_filename = Column(String, nullable=True)
     duration_ms = Column(Integer, nullable=True)
     order_index = Column(Integer, default=0)
 
